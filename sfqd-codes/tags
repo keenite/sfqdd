@@ -1,0 +1,63 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.9~svn20110310	//
+DEBUG_FUN	sfqd.c	23;"	d	file:
+DEBUG_NUM	sfqd.c	31;"	d	file:
+DEBUG_PID	sfqd.c	38;"	d	file:
+DPRINTK	sfqd.c	25;"	d	file:
+DPRINTK	sfqd.c	27;"	d	file:
+FUN_NAME	sfqd.c	21;"	d	file:
+NPRINTK	sfqd.c	33;"	d	file:
+NPRINTK	sfqd.c	35;"	d	file:
+PPRINTK	sfqd.c	40;"	d	file:
+PPRINTK	sfqd.c	42;"	d	file:
+PS	sfqd.c	19;"	d	file:
+RQ_SFQQ	sfqd.c	45;"	d	file:
+RQ_SFQR	sfqd.c	46;"	d	file:
+US_TO_NS	sfqd.c	47;"	d	file:
+__this_module	sfqd.mod.c	/^struct module __this_module$/;"	v	typeref:struct:module
+__used	sfqd.mod.c	/^__used$/;"	v	file:
+__used	sfqd.mod.c	/^__used$/;"	v	typeref:struct:____versions	file:
+elevator_sfq	sfqd.c	/^static struct elevator_type elevator_sfq = {$/;"	v	typeref:struct:elevator_type	file:
+ft	sfqd.c	/^	unsigned long long ft; \/\/Finish tag$/;"	m	struct:sfq_req	file:
+last_ft	sfqd.c	/^	unsigned long long last_ft;$/;"	m	struct:sfq_queue	file:
+lazyt	sfqd.c	/^	unsigned long long lazyt;$/;"	m	struct:virt	file:
+list	sfqd.c	/^	struct list_head list;		\/\/Used by plist to put them together$/;"	m	struct:sfq_queue	typeref:struct:sfq_queue::list_head	file:
+lock	sfqd.c	/^	spinlock_t lock;$/;"	m	struct:sfq_queue	file:
+lock	sfqd.c	/^	spinlock_t lock;$/;"	m	struct:virt	file:
+lock_num	sfqd.c	/^	int lock_num;$/;"	m	struct:sfq_data	file:
+pid	sfqd.c	/^	pid_t	pid;$/;"	m	struct:sfq_queue	file:
+pid_sfq_exit	sfqd.c	/^module_exit(pid_sfq_exit);$/;"	v
+pid_sfq_exit	sfqd.c	/^static void __exit pid_sfq_exit(void)$/;"	f	file:
+pid_sfq_exit_queue	sfqd.c	/^static void pid_sfq_exit_queue(struct elevator_queue *e)$/;"	f	file:
+pid_sfq_init	sfqd.c	/^module_init(pid_sfq_init);$/;"	v
+pid_sfq_init	sfqd.c	/^static int __init pid_sfq_init(void)$/;"	f	file:
+pid_sfq_init_queue	sfqd.c	/^static int *pid_sfq_init_queue(struct request_queue *q)$/;"	f	file:
+pid_to_sfqq	sfqd.c	/^static struct sfq_queue *pid_to_sfqq(struct sfq_data *sfqd, int pid)$/;"	f	file:
+plist	sfqd.c	/^	struct list_head plist;$/;"	m	struct:sfq_data	typeref:struct:sfq_data::list_head	file:
+pro_reqs	sfqd.c	/^	struct list_head pro_reqs;  \/\/Put reqs inside the queue$/;"	m	struct:sfq_queue	typeref:struct:sfq_queue::list_head	file:
+qroot	sfqd.c	/^	struct radix_tree_root *qroot;$/;"	m	struct:sfq_data	typeref:struct:sfq_data::radix_tree_root	file:
+queue	sfqd.c	/^	struct request_queue *queue;	\/\/Block device request queue$/;"	m	struct:sfq_data	typeref:struct:sfq_data::request_queue	file:
+ref	sfqd.c	/^	int	ref;$/;"	m	struct:sfq_queue	file:
+rlist	sfqd.c	/^	list_head rlist; \/\/ All the request will put in a queue base on their start tag$/;"	m	struct:sfq_req	file:
+rlist_head	sfqd.c	/^	struct list_head rlist_head;$/;"	m	struct:sfq_data	typeref:struct:sfq_data::list_head	file:
+rq	sfqd.c	/^	struct request *rq; \/\/ The request pointer$/;"	m	struct:sfq_req	typeref:struct:sfq_req::request	file:
+rq_count	sfqd.c	/^static int rq_count = 0;$/;"	v	file:
+set_put_count	sfqd.c	/^static int set_put_count = 0;$/;"	v	file:
+sfq_add_request	sfqd.c	/^static void sfq_add_request(struct request_queue *q, struct request *rq)$/;"	f	file:
+sfq_completed_request	sfqd.c	/^static void sfq_completed_request(struct request_queue *q, struct request* rq)$/;"	f	file:
+sfq_create_queue	sfqd.c	/^static struct sfq_queue *sfq_create_queue(struct sfq_data *sfqd, gfp_t gfp_mask)$/;"	f	file:
+sfq_data	sfqd.c	/^struct sfq_data { \/\/global$/;"	s	file:
+sfq_dispatch	sfqd.c	/^static int sfq_dispatch(struct request_queue *q, int force)$/;"	f	file:
+sfq_put_request	sfqd.c	/^static void sfq_put_request(struct request *rq)$/;"	f	file:
+sfq_queue	sfqd.c	/^struct sfq_queue{ \/\/per process$/;"	s	file:
+sfq_req	sfqd.c	/^struct sfq_req{ \/\/per request$/;"	s	file:
+sfq_set_request	sfqd.c	/^static int sfq_set_request(struct request_queue *q, struct request *rq, gfp_t gfp_mask) { $/;"	f	file:
+sfqd	sfqd.c	/^	struct sfq_data *sfqd;$/;"	m	struct:sfq_queue	typeref:struct:sfq_queue::sfq_data	file:
+st	sfqd.c	/^	unsigned long long st; \/\/Start tag$/;"	m	struct:sfq_req	file:
+t	sfqd.c	/^	unsigned long long t;$/;"	m	struct:virt	file:
+virt	sfqd.c	/^struct virt{ \/\/global virtual time$/;"	s	file:
+vt	sfqd.c	/^static struct virt *vt;$/;"	v	typeref:struct:virt	file:
