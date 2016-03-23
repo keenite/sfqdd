@@ -14,9 +14,13 @@
 #include <linux/spinlock.h>
 #include <linux/semaphore.h>
 #include <linux/delay.h>
+#include <linux/seq_file.h>
+#include <linux/proc_fs.h>
 //#include <linux/atomic.h>
 
 #define PS 4096
+#define WRITE_TARG 180
+#define READ_TARG 180
 
 #define FUN_NAME "<%s>: "
 
@@ -48,8 +52,14 @@
 
 #define CAL_SIZE 1000
 
+static struct proc_dir_entry *sfqd_status;
+struct sfq_data *global_sfqd;
+
 static int rq_count = 0;
 static int set_put_count = 0;
+static int adjg = 0;
+static int latg = 0;
+static int targetg = 0;
 
 static struct virt *vt;
 
@@ -261,21 +271,26 @@ static int sfq_set_request(struct request_queue *q, struct request *rq, struct b
 	if(--sfqd->counter < 0) {
 	  if(sfqd->num_read > 0) {
 	    read_lat = ((int) sfqd->read_lat/sfqd->num_read);
-	    read_lat *= (sfqd->num_read/sfqd->cal);
+	    read_lat = read_lat * sfqd->num_read/sfqd->cal;
 	  }
 	  if(sfqd->num_write > 0) {
 	    write_lat = ((int) sfqd->write_lat/sfqd->num_write);
-	    write_lat *= (sfqd->num_write/sfqd->cal);
+	    write_lat = write_lat * sfqd->num_write/sfqd->cal;
 	  }
 
 	  lat = write_lat + read_lat;
-	  printk("Average Latency: %d\n", lat);
-	  target = sfqd->read_targ*(sfqd->num_read/sfqd->cal) + sfqd->write_targ*(sfqd->num_write/sfqd->cal);
-	  
+	  DPRINTK("Average Latency: %d\n", lat);
+	  target = (sfqd->read_targ*sfqd->num_read)/sfqd->cal + (sfqd->write_targ*sfqd->num_write)/sfqd->cal; 
 	  adj = target - lat;
 	  adj = adj*.03;
-	  printk("Read Latency:%lu\n, Read Weight:%d\n, Total:%d\n", sfqd->read_lat, sfqd->num_read, sfqd->cal);
-	  printk("Target: %d\nAdj: %d\n", target, adj);
+	  adjg = adj;
+	  targetg = target;
+	  latg = lat;
+//	printk("target=%d,lat=%d, sfqd->num_read=%d, sfqd->num_write=%d, sfqd->cal=%d, sfqd->write_lat=%d\n, sfqd->write_targ=%d, percent_write=%d",
+//			target, lat, sfqd->num_read, sfqd->num_write, sfqd->cal, sfqd->write_lat, sfqd->write_targ, sfqd->num_write/sfqd->cal);
+	  DPRINTK("Read Latency:%lu\n, Read Weight:%d\n, Total:%d, read_lat = %d\n", sfqd->read_lat, sfqd->num_read, sfqd->cal, ave_read);
+//	  printk("Read ave: %lu\n, Write ave: %lu\n", (int) sfqd->read_lat/sfqd->num_read, (int)sfqd->write_lat/sfqd->num_write);
+	  DPRINTK("Target: %d\nAdj: %d\n", target, adj);
 	  sfqd->depth=sfqd->depth+adj;
 	  
 	  /* sfqd->depth = sfqd->depth * (sfqd->read_targ/(sfqd->read_lat/sfqd->num_read)); */
@@ -283,18 +298,20 @@ static int sfq_set_request(struct request_queue *q, struct request *rq, struct b
 	  if(sfqd->depth < 1)
 	    sfqd->depth = 1;
 
-	  printk("Depth: %d\n", sfqd->depth);
+	  DPRINTK("Depth: %d\n", sfqd->depth);
 
 	    /* if (sfqd->read_lat/sfqd->num_read < sfqd->read_targ) */
 	    /*   sfqd->depth++; */
 	    /* else if (sfqd->read_lat/sfqd->num_read > sfqd->read_targ) */
 	    /*   sfqd->depth--; */
+/*
 	  sfqd->counter=1000;
 	  sfqd->cal = 0;
 	  sfqd->num_read = 0;
 	  sfqd->num_write = 0;
 	  sfqd->write_lat = 0;
 	  sfqd->read_lat = 0;
+*/
 	}
 	
 	return 0;
@@ -310,6 +327,40 @@ static void sfq_put_request(struct request *rq)
 	/* sfqq->ref--; */
 	/* spin_unlock(&sfqq->lock); */
 }
+
+static int status_show(struct seq_file *m, void *v){
+	struct sfq_data *sfqd = global_sfqd;
+	int ave_read = 0, ave_write = 0;
+	int read_lat=0, write_lat=0;
+
+	if(sfqd->num_read > 0) {
+		read_lat = ((int) sfqd->read_lat/sfqd->num_read);
+		ave_read = read_lat;
+	}
+
+	if(sfqd->num_write > 0) {
+		write_lat = ((int) sfqd->write_lat/sfqd->num_write);
+		ave_write = write_lat;
+	}
+
+	//printk("read_lat[%d] read#[%d] write_lat[%d] write#[%d] depth[%d]\n", ave_read, sfqd->num_read, ave_write, sfqd->num_write, sfqd->depth);
+	seq_printf(m, "sfqd->num_read=%d, sfqd->num_write=%d, sfqd->cal=%d, sfqd->write_lat=%d\n",sfqd->num_read, sfqd->num_write, sfqd->cal, sfqd->write_lat);
+	seq_printf(m, "read_lat[%d] read#[%d] write_lat[%d] write#[%d] depth[%d] target[%d] cur_lat[%d] depth_adj[%d]\n", 
+			ave_read, sfqd->num_read, ave_write, sfqd->num_write, sfqd->depth, targetg, latg, adjg);
+	return 0;
+}
+
+static int sfqd_open(struct inode *inode, struct file *file){
+	return single_open(file, status_show, NULL);
+}
+
+static const struct file_operations sfqd_fops={
+	.owner	=	THIS_MODULE,
+	.open	=	sfqd_open,
+	.read	=	seq_read,
+	.llseek	=	seq_lseek,
+	.release=	single_release,
+};
 
 static void sfq_completed_request(struct request_queue *q, struct request* rq)
 {
@@ -364,9 +415,8 @@ static void sfq_completed_request(struct request_queue *q, struct request* rq)
 	}
 		
 	vt->t = temp;
-
 	
-	
+	DPRINTK("Write Latency:%lu\n, Write Weight:%d\n, Total:%d, write_lat = %d\n", sfqd->write_lat, sfqd->num_write, sfqd->cal, ave_write);
 	DPRINTK("The new vt[%llu]\n", vt->t);
 
 	kfree(sfqr);
@@ -382,6 +432,7 @@ static int pid_sfq_init_queue(struct request_queue *q)
 		printk("Error: No memory\n");
 		return -ENOMEM;
 	}
+	global_sfqd = sfqd;
 	vt->t = 0;
 	sfqd->queue = q;
 	sfqd->lock_num = 1;
@@ -399,10 +450,14 @@ static int pid_sfq_init_queue(struct request_queue *q)
 	/* sfqd->write_targ=100; */
 	/* sfqd->read_targ=481; */
 
-	sfqd->write_targ=360;
-	sfqd->read_targ=170;
+	sfqd->write_targ=WRITE_TARG;
+	sfqd->read_targ=READ_TARG;
 
 	spin_lock_init(&sfqd->lock);
+
+	sfqd_status = proc_create("sfqd_status", 0, NULL, &sfqd_fops);
+	if (!sfqd_status)
+		return -ENOMEM;
 
 	if (sfqd->qroot == NULL) {
 		printk("Cannot allocate memory.\n");
@@ -419,7 +474,7 @@ static int pid_sfq_init_queue(struct request_queue *q)
 	INIT_LIST_HEAD(&sfqd->oslist_head);
 	/* INIT_LIST_HEAD(&sfqd->wlist_head); */
 	q->elevator->elevator_data = sfqd;
-	sfqd->depth = 1;
+	sfqd->depth = 16;
 	sfqd->dispatched = 0;
 
 	return 0;
@@ -457,6 +512,7 @@ static int __init pid_sfq_init(void)
 	vt->lazyt = -1;
 	spin_lock_init(&vt->lock);
 	DPRINTK("sfqd init.\n");
+
 	return elv_register(&elevator_sfq);
 }
 
