@@ -1,0 +1,9 @@
+[global]
+direct=1
+filename=/dev/sda
+
+[RandomRead]
+size=6g
+blocksize=4k
+numjobs=1
+iodepth=4
