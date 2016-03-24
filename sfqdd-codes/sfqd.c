@@ -19,8 +19,9 @@
 //#include <linux/atomic.h>
 
 #define PS 4096
-#define WRITE_TARG 180
-#define READ_TARG 180
+#define WRITE_TARG 40
+#define READ_TARG 145
+#define DEFAULT_DEPTH 16
 
 #define FUN_NAME "<%s>: "
 
@@ -239,7 +240,7 @@ static struct sfq_queue *pid_to_sfqq(struct sfq_data *sfqd, int pid)
 static int sfq_set_request(struct request_queue *q, struct request *rq, struct bio *bio, gfp_t gfp_mask) { 
 	struct sfq_data *sfqd = q->elevator->elevator_data;
 	struct sfq_queue *sfqq = pid_to_sfqq(sfqd, current->pid);
-	int lat, read_lat=0, write_lat=0, target;
+	unsigned long lat, read_lat=0, write_lat=0, target;
 	int adj;
 	
 	DPRINTK("Cur virt time[%llu]\n", vt->t);
@@ -270,11 +271,11 @@ static int sfq_set_request(struct request_queue *q, struct request *rq, struct b
 	
 	if(--sfqd->counter < 0) {
 	  if(sfqd->num_read > 0) {
-	    read_lat = ((int) sfqd->read_lat/sfqd->num_read);
+	    read_lat = ( sfqd->read_lat/sfqd->num_read);
 	    read_lat = read_lat * sfqd->num_read/sfqd->cal;
 	  }
 	  if(sfqd->num_write > 0) {
-	    write_lat = ((int) sfqd->write_lat/sfqd->num_write);
+	    write_lat = (sfqd->write_lat/sfqd->num_write);
 	    write_lat = write_lat * sfqd->num_write/sfqd->cal;
 	  }
 
@@ -330,22 +331,22 @@ static void sfq_put_request(struct request *rq)
 
 static int status_show(struct seq_file *m, void *v){
 	struct sfq_data *sfqd = global_sfqd;
-	int ave_read = 0, ave_write = 0;
-	int read_lat=0, write_lat=0;
+	unsigned long ave_read = 0, ave_write = 0;
+	unsigned long read_lat = 0, write_lat = 0;
 
 	if(sfqd->num_read > 0) {
-		read_lat = ((int) sfqd->read_lat/sfqd->num_read);
+		read_lat = ((unsigned long) sfqd->read_lat/sfqd->num_read);
 		ave_read = read_lat;
 	}
 
 	if(sfqd->num_write > 0) {
-		write_lat = ((int) sfqd->write_lat/sfqd->num_write);
+		write_lat = ((unsigned long)sfqd->write_lat/sfqd->num_write);
 		ave_write = write_lat;
 	}
 
 	//printk("read_lat[%d] read#[%d] write_lat[%d] write#[%d] depth[%d]\n", ave_read, sfqd->num_read, ave_write, sfqd->num_write, sfqd->depth);
 	seq_printf(m, "sfqd->num_read=%d, sfqd->num_write=%d, sfqd->cal=%d, sfqd->write_lat=%d\n",sfqd->num_read, sfqd->num_write, sfqd->cal, sfqd->write_lat);
-	seq_printf(m, "read_lat[%d] read#[%d] write_lat[%d] write#[%d] depth[%d] target[%d] cur_lat[%d] depth_adj[%d]\n", 
+	seq_printf(m, "read_lat[%lu] read#[%d] write_lat[%lu] write#[%d] depth[%d] target[%d] cur_lat[%d] depth_adj[%d]\n", 
 			ave_read, sfqd->num_read, ave_write, sfqd->num_write, sfqd->depth, targetg, latg, adjg);
 	return 0;
 }
@@ -474,7 +475,7 @@ static int pid_sfq_init_queue(struct request_queue *q)
 	INIT_LIST_HEAD(&sfqd->oslist_head);
 	/* INIT_LIST_HEAD(&sfqd->wlist_head); */
 	q->elevator->elevator_data = sfqd;
-	sfqd->depth = 16;
+	sfqd->depth = DEFAULT_DEPTH;
 	sfqd->dispatched = 0;
 
 	return 0;
