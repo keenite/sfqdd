@@ -19,8 +19,10 @@
 //#include <linux/atomic.h>
 
 #define PS 4096
-#define WRITE_TARG 40
-#define READ_TARG 145
+#define WRITE_TARG 400
+#define READ_TARG 400
+#define READ_DEPTH 12
+#define WRITE_DEPTH 4
 #define DEFAULT_DEPTH 16
 
 #define FUN_NAME "<%s>: "
@@ -72,7 +74,9 @@ struct virt{ //global virtual time
 
 struct sfq_queue{ //per process
 	struct sfq_data *sfqd;
-	struct list_head pro_reqs;  //Put reqs inside the queue
+//	struct list_head pro_reqs;  //Put reqs inside the queue
+	struct list_head read_reqs;  //Put reqs inside the queue
+	struct list_head write_reqs;  //Put reqs inside the queue
 	struct list_head list;		//Used by plist to put them together
 	pid_t	pid;
 	int	ref;
@@ -102,25 +106,24 @@ struct sfq_data{ //global
 	unsigned long long *wl; //write latency array
 	unsigned long long *rl; //read latency array
 	int wp,rp,cal; //The read and write pointer in read/write latency array
-  unsigned long read_lat, write_lat, read_targ, write_targ;
-  int num_read, num_write;
+	unsigned long read_lat, write_lat, read_targ, write_targ;
+	int num_read, num_write;
 	int lock_num;
-  int  dispatched;
-  int depth;
+	int read_dispatched;
+	int write_dispatched;
+	//int depth;
+	int read_depth;
+	int write_depth;
 	spinlock_t lock;
-  int counter;
+	int counter;
 };
 
 
 static int sfq_dispatch(struct request_queue *q, int force)
 {
 	struct sfq_data *sfqd = q->elevator->elevator_data;
-	struct sfq_req *sfqr, *min_rq = NULL;
+	struct sfq_req *sfqr, *min_rq = NULL, *read_min_rq = NULL, *write_min_rq = NULL;
 	struct sfq_queue *process;
-
-	if(sfqd->dispatched >= sfqd->depth){
-	  return 0;
-	}
 
 	/* if (!list_empty(&sfqd->wlist_head)) { */
 	/* 	//FIXed: Replace with process loop */
@@ -130,28 +133,50 @@ static int sfq_dispatch(struct request_queue *q, int force)
 	/* } */
 
 	list_for_each_entry(process, &sfqd->plist, list) {
-		if(!list_empty(&process->pro_reqs)){
-			sfqr = list_first_entry(&process->pro_reqs, struct sfq_req, wlist);
-			if(sfqr == NULL){
-				continue;
+		if(!list_empty(&process->read_reqs)){
+			sfqr = list_first_entry(&process->read_reqs, struct sfq_req, wlist);
+			if(sfqr != NULL){
+				if(read_min_rq == NULL)
+					read_min_rq = sfqr;
+				else if(read_min_rq->st > sfqr->st)
+					read_min_rq = sfqr;
+			}	
+		}
+
+		if(!list_empty(&process->write_reqs)){
+			sfqr = list_first_entry(&process->write_reqs, struct sfq_req, wlist);
+			if(sfqr != NULL){
+				if(write_min_rq == NULL)
+					write_min_rq = sfqr;
+				else if(write_min_rq->st > sfqr->st)
+					write_min_rq = sfqr;
 			}
 			
-			if(min_rq == NULL)
-				min_rq = sfqr;
-			else if(min_rq->st > sfqr->st)
-			  min_rq = sfqr;
 		}
 	} 
 
+	if (read_min_rq == NULL)
+		min_rq = write_min_rq;
+	else if (write_min_rq == NULL)
+		min_rq = read_min_rq;
+	else if (read_min_rq->st < write_min_rq->st || sfqd->write_depth < sfqd->write_dispatched) {
+		min_rq = read_min_rq;
+	} else
+		min_rq = write_min_rq;
+
 	if (min_rq != NULL) {
-		spin_lock(&((struct sfq_queue *)min_rq->rq->elv.priv[0])->lock);
-		sfqd->dispatched++;
+		//spin_lock(&((struct sfq_queue *)min_rq->rq->elv.priv[0])->lock);
+		if(rq_data_dir(min_rq->rq) == READ) {
+			sfqd->read_dispatched++;
+		} else
+			sfqd->write_dispatched++;
+
 		list_del_init(&min_rq->wlist);
-		spin_unlock(&((struct sfq_queue *)min_rq->rq->elv.priv[0])->lock);
+	//	spin_unlock(&((struct sfq_queue *)min_rq->rq->elv.priv[0])->lock);
 
 		list_add_tail(&min_rq->oslist, &sfqd->oslist_head);
 		min_rq->skt = ktime_get();
-		elv_dispatch_sort(q, min_rq->rq);		
+		elv_dispatch_sort(q, min_rq->rq);
 		
 		return 1;
 	} else {
@@ -197,9 +222,15 @@ static void sfq_add_request(struct request_queue *q, struct request *rq)
 
 	rq->elv.priv[1] = sfqr;
 	//list_add_tail(&rq->queuelist, &sfqq->pro_reqs); */ //needs to be sfq_req start tag
-	spin_lock(&sfqq->lock);
-	list_add_tail(&sfqr->wlist, &sfqq->pro_reqs);
-	spin_unlock(&sfqq->lock);
+	if(rq_data_dir(rq) == READ) {
+		spin_lock(&sfqq->lock);
+		list_add_tail(&sfqr->wlist, &sfqq->read_reqs);
+		spin_unlock(&sfqq->lock);
+	} else {
+		spin_lock(&sfqq->lock);
+		list_add_tail(&sfqr->wlist, &sfqq->write_reqs);
+		spin_unlock(&sfqq->lock);
+	}
 }
 
 static struct sfq_queue *sfq_create_queue(struct sfq_data *sfqd, gfp_t gfp_mask)
@@ -218,7 +249,8 @@ static struct sfq_queue *sfq_create_queue(struct sfq_data *sfqd, gfp_t gfp_mask)
 	sfqq->last_ft = 0;
 	spin_lock_init(&sfqq->lock);
 	NPRINTK("Create a sfq_queue for process PID %d\n", sfqq->pid);
-	INIT_LIST_HEAD(&sfqq->pro_reqs);
+	INIT_LIST_HEAD(&sfqq->read_reqs);
+	INIT_LIST_HEAD(&sfqq->write_reqs);
 	return sfqq; 
 }
 
@@ -283,7 +315,7 @@ static int sfq_set_request(struct request_queue *q, struct request *rq, struct b
 	  DPRINTK("Average Latency: %d\n", lat);
 	  target = (sfqd->read_targ*sfqd->num_read)/sfqd->cal + (sfqd->write_targ*sfqd->num_write)/sfqd->cal; 
 	  adj = target - lat;
-	  adj = adj*.03;
+	  adj = adj;
 	  adjg = adj;
 	  targetg = target;
 	  latg = lat;
@@ -292,12 +324,12 @@ static int sfq_set_request(struct request_queue *q, struct request *rq, struct b
 	  DPRINTK("Read Latency:%lu\n, Read Weight:%d\n, Total:%d, read_lat = %d\n", sfqd->read_lat, sfqd->num_read, sfqd->cal, ave_read);
 //	  printk("Read ave: %lu\n, Write ave: %lu\n", (int) sfqd->read_lat/sfqd->num_read, (int)sfqd->write_lat/sfqd->num_write);
 	  DPRINTK("Target: %d\nAdj: %d\n", target, adj);
-	  sfqd->depth=sfqd->depth+adj;
+//	  sfqd->depth=sfqd->depth+adj;
 	  
 	  /* sfqd->depth = sfqd->depth * (sfqd->read_targ/(sfqd->read_lat/sfqd->num_read)); */
 
-	  if(sfqd->depth < 1)
-	    sfqd->depth = 1;
+//	  if(sfqd->depth < 1)
+//	    sfqd->depth = 1;
 
 	  DPRINTK("Depth: %d\n", sfqd->depth);
 
@@ -346,8 +378,8 @@ static int status_show(struct seq_file *m, void *v){
 
 	//printk("read_lat[%d] read#[%d] write_lat[%d] write#[%d] depth[%d]\n", ave_read, sfqd->num_read, ave_write, sfqd->num_write, sfqd->depth);
 	seq_printf(m, "sfqd->num_read=%d, sfqd->num_write=%d, sfqd->cal=%d, sfqd->write_lat=%d\n",sfqd->num_read, sfqd->num_write, sfqd->cal, sfqd->write_lat);
-	seq_printf(m, "read_lat[%lu] read#[%d] write_lat[%lu] write#[%d] depth[%d] target[%d] cur_lat[%d] depth_adj[%d]\n", 
-			ave_read, sfqd->num_read, ave_write, sfqd->num_write, sfqd->depth, targetg, latg, adjg);
+	seq_printf(m, "read_lat[%lu] read#[%d] write_lat[%lu] write#[%d] read_depth[%d] write_depth[%d] target[%d] cur_lat[%d] depth_adj[%d]\n", 
+			ave_read, sfqd->num_read, ave_write, sfqd->num_write, sfqd->read_depth, sfqd->write_depth, targetg, latg, adjg);
 	return 0;
 }
 
@@ -373,7 +405,12 @@ static void sfq_completed_request(struct request_queue *q, struct request* rq)
 
 	sfqr->fkt = ktime_get();
 	list_del(&sfqr->oslist);
-	sfqd->dispatched--;
+
+	if (rq_data_dir(rq) == READ) {
+		sfqd->read_dispatched--;
+	} else {
+		sfqd->write_dispatched--;
+	}
 
 	lat = ktime_us_delta(sfqr->fkt, sfqr->skt);
 	sfqd->cal++;
@@ -407,8 +444,14 @@ static void sfq_completed_request(struct request_queue *q, struct request* rq)
 	else {
 		temp = sfqr->ft;
 		list_for_each_entry(process, &sfqd->plist, list) {
-			if(!list_empty(&process->pro_reqs)){
-				req = list_first_entry(&process->pro_reqs, struct sfq_req, wlist);
+			if(!list_empty(&process->read_reqs)){
+				req = list_first_entry(&process->read_reqs, struct sfq_req, wlist);
+				if(temp > req->st)
+					temp = req->st;
+			}
+
+			if(!list_empty(&process->write_reqs)){
+				req = list_first_entry(&process->write_reqs, struct sfq_req, wlist);
 				if(temp > req->st)
 					temp = req->st;
 			}
@@ -453,6 +496,8 @@ static int pid_sfq_init_queue(struct request_queue *q)
 
 	sfqd->write_targ=WRITE_TARG;
 	sfqd->read_targ=READ_TARG;
+	sfqd->read_depth = READ_DEPTH;
+	sfqd->write_depth = WRITE_DEPTH;
 
 	spin_lock_init(&sfqd->lock);
 
@@ -475,8 +520,8 @@ static int pid_sfq_init_queue(struct request_queue *q)
 	INIT_LIST_HEAD(&sfqd->oslist_head);
 	/* INIT_LIST_HEAD(&sfqd->wlist_head); */
 	q->elevator->elevator_data = sfqd;
-	sfqd->depth = DEFAULT_DEPTH;
-	sfqd->dispatched = 0;
+	sfqd->read_dispatched = 0;
+	sfqd->write_dispatched = 0;
 
 	return 0;
 }
