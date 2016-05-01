@@ -22,7 +22,7 @@
 #define WRITE_TARG 400
 #define READ_TARG 400
 #define READ_DEPTH 12
-#define WRITE_DEPTH 4
+#define WRITE_DEPTH 2
 #define DEFAULT_DEPTH 16
 
 #define FUN_NAME "<%s>: "
@@ -132,6 +132,9 @@ static int sfq_dispatch(struct request_queue *q, int force)
 	/* 	min_rq = sfqr; */
 	/* } */
 
+//	if (sfqd->read_dispatched + sfqd->write_dispatched > DEFAULT_DEPTH)
+//		return 0;
+
 	list_for_each_entry(process, &sfqd->plist, list) {
 		if(!list_empty(&process->read_reqs)){
 			sfqr = list_first_entry(&process->read_reqs, struct sfq_req, wlist);
@@ -155,14 +158,18 @@ static int sfq_dispatch(struct request_queue *q, int force)
 		}
 	} 
 
-	if (read_min_rq == NULL)
-		min_rq = write_min_rq;
-	else if (write_min_rq == NULL)
+	if (read_min_rq != NULL)
 		min_rq = read_min_rq;
-	else if (read_min_rq->st < write_min_rq->st || sfqd->write_depth < sfqd->write_dispatched) {
-		min_rq = read_min_rq;
-	} else
+	else
 		min_rq = write_min_rq;
+//	if (read_min_rq == NULL)
+//		min_rq = write_min_rq;
+//	else if (write_min_rq == NULL)
+//		min_rq = read_min_rq;
+//	else if (read_min_rq->st < write_min_rq->st || sfqd->write_depth < sfqd->write_dispatched) {
+//		min_rq = read_min_rq;
+//	} else
+//		min_rq = write_min_rq;
 
 	if (min_rq != NULL) {
 		//spin_lock(&((struct sfq_queue *)min_rq->rq->elv.priv[0])->lock);
