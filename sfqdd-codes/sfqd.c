@@ -19,11 +19,16 @@
 //#include <linux/atomic.h>
 
 #define PS 4096
-#define WRITE_TARG 400
-#define READ_TARG 400
-#define READ_DEPTH 12
-#define WRITE_DEPTH 2
+#define WRITE_TARG 129
+#define READ_TARG 115
 #define DEFAULT_DEPTH 16
+#define WEPOCH 5
+
+#define READ_DEPTH 14
+#define WRITE_DEPTH 4
+
+//#define READ_DEPTH 14
+//#define WRITE_DEPTH 12
 
 #define FUN_NAME "<%s>: "
 
@@ -106,8 +111,8 @@ struct sfq_data{ //global
     unsigned long long *wl; //write latency array
     unsigned long long *rl; //read latency array
     int wp,rp,cal; //The read and write pointer in read/write latency array
-    unsigned long read_lat, write_lat, read_targ, write_targ;
-    int num_read, num_write;
+    unsigned long read_lat, write_lat, read_targ, write_targ, total_read_lat, total_write_lat;
+    int num_read, num_write, total_num_read, total_num_write;
     int lock_num;
     int read_dispatched;
     int write_dispatched;
@@ -116,6 +121,7 @@ struct sfq_data{ //global
     int write_depth;
     spinlock_t lock;
     int counter;
+    int wepoch;
 };
 
 
@@ -124,59 +130,64 @@ static int sfq_dispatch(struct request_queue *q, int force)
     struct sfq_data *sfqd = q->elevator->elevator_data;
     struct sfq_req *sfqr, *min_rq = NULL, *read_min_rq = NULL, *write_min_rq = NULL;
     struct sfq_queue *process;
-
-    /* if (!list_empty(&sfqd->wlist_head)) { */
-    /* 	//FIXed: Replace with process loop */
-    /* 	sfqr = list_first_entry(&sfqd->wlist_head, struct sfq_req, wlist); */
-    /* 	list_del(&sfqr->wlist);	 */
-    /* 	min_rq = sfqr; */
-    /* } */
-
-    //	if (sfqd->read_dispatched + sfqd->write_dispatched > DEFAULT_DEPTH)
-    //		return 0;
+    int read_lat = 1, write_lat = 1;
 
     list_for_each_entry(process, &sfqd->plist, list) {
-	if(!list_empty(&process->read_reqs)){
+	if (!list_empty(&process->read_reqs)){
 	    sfqr = list_first_entry(&process->read_reqs, struct sfq_req, wlist);
-	    if(sfqr != NULL){
-		if(read_min_rq == NULL)
+	    if (sfqr != NULL){
+		if (read_min_rq == NULL)
 		    read_min_rq = sfqr;
-		else if(read_min_rq->st > sfqr->st)
+		else if (read_min_rq->st > sfqr->st)
 		    read_min_rq = sfqr;
 	    }	
 	}
 
-	if(!list_empty(&process->write_reqs)){
+	if (!list_empty(&process->write_reqs)){
 	    sfqr = list_first_entry(&process->write_reqs, struct sfq_req, wlist);
-	    if(sfqr != NULL){
-		if(write_min_rq == NULL)
+	    if (sfqr != NULL){
+		if (write_min_rq == NULL)
 		    write_min_rq = sfqr;
 		else if(write_min_rq->st > sfqr->st)
 		    write_min_rq = sfqr;
 	    }
-
 	}
     } 
 
-    if (read_min_rq != NULL)
-	min_rq = read_min_rq;
-    else
-	min_rq = write_min_rq;
-    //	if (read_min_rq == NULL)
-    //		min_rq = write_min_rq;
-    //	else if (write_min_rq == NULL)
-    //		min_rq = read_min_rq;
-    //	else if (read_min_rq->st < write_min_rq->st || sfqd->write_depth < sfqd->write_dispatched) {
-    //		min_rq = read_min_rq;
-    //	} else
-    //		min_rq = write_min_rq;
+    if (sfqd->num_read > 0)
+	read_lat = (sfqd->read_lat / sfqd->num_read);
+
+    if (sfqd->num_write > 0)
+	write_lat = (sfqd->write_lat / sfqd->num_write);
+
+    if (read_min_rq == NULL || write_min_rq == NULL)
+	min_rq = (read_min_rq == NULL)? write_min_rq : read_min_rq;
+    else {
+	if (read_min_rq->st < write_min_rq->st)
+	    min_rq = read_min_rq;
+	else if (read_lat > READ_TARG)
+	    min_rq = read_min_rq;
+	else
+	    min_rq = write_min_rq;
+
+	//if (rq_data_dir(min_rq->rq) == READ && sfqd->wepoch > WEPOCH) {
+	 //   min_rq = write_min_rq;
+//	}
+    }
 
     if (min_rq != NULL) {
 	//spin_lock(&((struct sfq_queue *)min_rq->rq->elv.priv[0])->lock);
 	if(rq_data_dir(min_rq->rq) == READ) {
+//	    if (sfqd->read_dispatched >= READ_DEPTH)
+//		return 0;
 	    sfqd->read_dispatched++;
-	} else
+	    sfqd->wepoch++;
+	} else {
+	    if (sfqd->write_dispatched >= WRITE_DEPTH)
+		return 0;
 	    sfqd->write_dispatched++;
+	    sfqd->wepoch = 0;
+	}
 
 	list_del_init(&min_rq->wlist);
 	//	spin_unlock(&((struct sfq_queue *)min_rq->rq->elv.priv[0])->lock);
@@ -280,7 +291,7 @@ static int sfq_set_request(struct request_queue *q, struct request *rq, struct b
     struct sfq_data *sfqd = q->elevator->elevator_data;
     struct sfq_queue *sfqq = pid_to_sfqq(sfqd, current->pid);
     unsigned long lat, read_lat=0, write_lat=0, target;
-    int adj;
+    int adj, read_adj, write_adj;
 
     DPRINTK("Cur virt time[%llu]\n", vt->t);
 
@@ -310,22 +321,33 @@ static int sfq_set_request(struct request_queue *q, struct request *rq, struct b
 
     if(--sfqd->counter < 0) {
 	if(sfqd->num_read > 0) {
-	    read_lat = ( sfqd->read_lat/sfqd->num_read);
-	    read_lat = read_lat * sfqd->num_read/sfqd->cal;
+	    read_lat = (sfqd->read_lat / sfqd->num_read);
 	}
 	if(sfqd->num_write > 0) {
-	    write_lat = (sfqd->write_lat/sfqd->num_write);
-	    write_lat = write_lat * sfqd->num_write/sfqd->cal;
+	    write_lat = (sfqd->write_lat / sfqd->num_write);
 	}
 
-	lat = write_lat + read_lat;
+	read_adj = READ_TARG - read_lat;
+	write_adj = WRITE_TARG - write_lat;
+
+	if (read_adj < 0)
+	    sfqd->read_depth--;
+	else
+	    sfqd->read_depth--;
+
+
+	if (write_adj > 0)
+	    sfqd->write_depth++;
+	else
+	    sfqd->write_depth--;	
+
+	if (sfqd->read_depth < 1)
+	    sfqd->read_depth = 1;
+
+	if (sfqd->write_depth < 1)
+	    sfqd->write_depth = 1;
+
 	DPRINTK("Average Latency: %d\n", lat);
-	target = (sfqd->read_targ*sfqd->num_read)/sfqd->cal + (sfqd->write_targ*sfqd->num_write)/sfqd->cal; 
-	adj = target - lat;
-	adj = adj;
-	adjg = adj;
-	targetg = target;
-	latg = lat;
 	//	printk("target=%d,lat=%d, sfqd->num_read=%d, sfqd->num_write=%d, sfqd->cal=%d, sfqd->write_lat=%d\n, sfqd->write_targ=%d, percent_write=%d",
 	//			target, lat, sfqd->num_read, sfqd->num_write, sfqd->cal, sfqd->write_lat, sfqd->write_targ, sfqd->num_write/sfqd->cal);
 	DPRINTK("Read Latency:%lu\n, Read Weight:%d\n, Total:%d, read_lat = %d\n", sfqd->read_lat, sfqd->num_read, sfqd->cal, ave_read);
@@ -344,14 +366,13 @@ static int sfq_set_request(struct request_queue *q, struct request *rq, struct b
 	/*   sfqd->depth++; */
 	/* else if (sfqd->read_lat/sfqd->num_read > sfqd->read_targ) */
 	/*   sfqd->depth--; */
-	/*
-	   sfqd->counter=1000;
-	   sfqd->cal = 0;
-	   sfqd->num_read = 0;
-	   sfqd->num_write = 0;
-	   sfqd->write_lat = 0;
-	   sfqd->read_lat = 0;
-	   */
+	
+	sfqd->counter=1000;
+	sfqd->cal = 0;
+	sfqd->num_read = 0;
+	sfqd->num_write = 0;
+	sfqd->write_lat = 0;
+	sfqd->read_lat = 0;
     }
 
     return 0;
@@ -373,20 +394,19 @@ static int status_show(struct seq_file *m, void *v){
     unsigned long ave_read = 0, ave_write = 0;
     unsigned long read_lat = 0, write_lat = 0;
 
-    if(sfqd->num_read > 0) {
-	read_lat = ((unsigned long) sfqd->read_lat/sfqd->num_read);
+    if(sfqd->total_num_read > 0) {
+	read_lat = ((unsigned long) sfqd->total_read_lat/sfqd->total_num_read);
 	ave_read = read_lat;
     }
 
-    if(sfqd->num_write > 0) {
-	write_lat = ((unsigned long)sfqd->write_lat/sfqd->num_write);
+    if(sfqd->total_num_write > 0) {
+	write_lat = ((unsigned long)sfqd->total_write_lat/sfqd->total_num_write);
 	ave_write = write_lat;
     }
 
     //printk("read_lat[%d] read#[%d] write_lat[%d] write#[%d] depth[%d]\n", ave_read, sfqd->num_read, ave_write, sfqd->num_write, sfqd->depth);
-    seq_printf(m, "sfqd->num_read=%d, sfqd->num_write=%d, sfqd->cal=%d, sfqd->write_lat=%d\n",sfqd->num_read, sfqd->num_write, sfqd->cal, sfqd->write_lat);
     seq_printf(m, "read_lat[%lu] read#[%d] write_lat[%lu] write#[%d] read_depth[%d] write_depth[%d] target[%d] cur_lat[%d] depth_adj[%d]\n", 
-	    ave_read, sfqd->num_read, ave_write, sfqd->num_write, sfqd->read_depth, sfqd->write_depth, targetg, latg, adjg);
+	    ave_read, sfqd->total_num_read, ave_write, sfqd->total_num_write, sfqd->read_depth, sfqd->write_depth, targetg, latg, adjg);
     return 0;
 }
 
@@ -426,29 +446,26 @@ static void sfq_completed_request(struct request_queue *q, struct request* rq)
     /* printk("Req Latency: %llu\n", lat); */
     if(rq_data_dir(rq) == READ) {
 	sfqd->read_lat += lat;
+	sfqd->total_read_lat += lat;
 	sfqd->num_read++;
-	/* sfqd->rl[sfqd->rp] = lat; */
-	/* sfqd->rp = sfqd->rp+1; */
-	/* sfqd->rp = (sfqd->rp)%CAL_SIZE; */
+	sfqd->total_num_read++;
     }
     else {
 	sfqd->write_lat += lat;
+	sfqd->total_write_lat += lat;
 	sfqd->num_write++;
-	/* sfqd->wl[sfqd->wp] = lat; */
-	/* sfqd->wp = sfqd->wp+1; */
-	/* sfqd->wp = (sfqd->rp)%CAL_SIZE; */
+	sfqd->total_num_write++;
     }	  
 
     /* DPRINTK("Sfqd vt[%llu] for PID[%d] request complete with [%llu]us\n", vt->t, sfqq->pid, lat); */
 
-    if(!list_empty(&sfqd->oslist_head)) {
-	temp=((struct sfq_req *)list_first_entry(&sfqd->oslist_head ,struct sfq_req, oslist))->st;
+    if (!list_empty(&sfqd->oslist_head)) {
+	temp = ((struct sfq_req *)list_first_entry(&sfqd->oslist_head ,struct sfq_req, oslist))->st;
 	list_for_each_entry(req, &sfqd->oslist_head, oslist) {
 	    if(temp > req->st)
 		temp = req->st;
 	}
-    }
-    else {
+    } else {
 	temp = sfqr->ft;
 	list_for_each_entry(process, &sfqd->plist, list) {
 	    if(!list_empty(&process->read_reqs)){
@@ -498,6 +515,11 @@ static int pid_sfq_init_queue(struct request_queue *q)
     sfqd->num_read = 0;
     sfqd->write_lat = 0;
     sfqd->read_lat = 0;
+    sfqd->total_num_write = 0;
+    sfqd->total_num_read = 0;
+    sfqd->total_write_lat = 0;
+    sfqd->total_read_lat = 0;
+    sfqd->wepoch = 0;
     /* sfqd->write_targ=100; */
     /* sfqd->read_targ=481; */
 
