@@ -165,14 +165,10 @@ static int sfq_dispatch(struct request_queue *q, int force)
     else {
 	if (read_min_rq->st < write_min_rq->st)
 	    min_rq = read_min_rq;
-	else if (read_lat > READ_TARG)
+	else if (read_lat > READ_TARG && write_lat < WRITE_TARG)
 	    min_rq = read_min_rq;
 	else
 	    min_rq = write_min_rq;
-
-	//if (rq_data_dir(min_rq->rq) == READ && sfqd->wepoch > WEPOCH) {
-	 //   min_rq = write_min_rq;
-//	}
     }
 
     if (min_rq != NULL) {

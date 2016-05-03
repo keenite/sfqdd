@@ -1,1 +1,0 @@
-cmd_/home/wenji/Dropbox/0sfqdd/sfqdd/sfqd-codes/sfqd.ko := ld -r -m elf_x86_64 -T ./scripts/module-common.lds --build-id  -o /home/wenji/Dropbox/0sfqdd/sfqdd/sfqd-codes/sfqd.ko /home/wenji/Dropbox/0sfqdd/sfqdd/sfqd-codes/sfqd.o /home/wenji/Dropbox/0sfqdd/sfqdd/sfqd-codes/sfqd.mod.o
